@@ -1,0 +1,310 @@
+---
+title: "AHS"
+author: "Abhishek Regmi"
+date: "4/19/2019"
+output: html_document
+---
+
+```{r, warning = FALSE}
+setwd("C:/Users/sz334/OneDrive/Desktop/AHS_Microdata_sale/AHS2014_15_for_sale/Stata")
+library(readstata13)
+library(tidyverse)
+ahs_cover <- read.dta13 ("./s00_rc.dta", convert.factors = T)
+ahs_personal <- read.dta13("./s01_rc.dta", convert.factors = T)
+ahs_housing <- read.dta13("./s02_rc.dta")
+ahs_food <- read.dta13("./s03_rc.dta")
+ahs_goods <-  read.dta13("./s04a_rc.dta")
+read.dta13("./S04b_rc.dta")
+read.dta13("./S04c_rc.dta")
+ahs_jobs <- read.dta13("./s05_rc.dta")
+```
+
+# Combo Data
+  This dataset combines the basic information, housing information and job information of the people.
+```{r, merge all the tables}
+ahs_combo <- ahs_personal %>%
+  left_join (ahs_cover) %>%
+  left_join(ahs_housing) %>%
+  left_join (ahs_jobs, by = c("hhno", "psu", "idcode1" = "idcode3"))
+ahs_combo
+```
+
+  
+```{r}
+View(ahs_cover)
+```
+
+
+## Working hours vs. household hours
+```{r, variables of interest}
+ahs_combo %>%
+  ggplot(aes(q05_01t1, q05_02t, color= q01_01)) +
+  geom_jitter(alpha = 0.4)
+
+ahs_combo %>%
+  ggplot(aes(q05_01t1, q05_02t, color= urbrur)) +
+  geom_jitter(alpha = 0.4)
+
+ahs_combo %>%
+  ggplot(aes(q05_01t1, q05_02t, color= q05_08)) +
+  geom_jitter(alpha = 0.5, size = 0.5) +
+  facet_wrap(vars(urbrur, q01_01))
+```
+# Male vs. Female
+  Based on the plot, we can find male makes more effort on their career rahther than household work. While female spends more time working in household rather than profession. However, taken as a whole, Women take on more work than men, and have balance between work and household. Most of female works more hours than male whether in career or the househole work. / Compare with men, A great number of women spend more time on household work although the hours they work outside of home almost as many as men.  
+
+# Urban vs. Rural
+  In urban area,  most people still choose to spend full-time in household work and part of peole do house work after work. In rural area, we can find that the majority of people devote more time on profession life. But most of them do household work while making money. 
+
+# working areas vs. woking hours
+  In urban area, working areas of male's main job are relatively even. Male who contribute family support without pay spend less time on working outside of home; others work more hours on their career. While more than half of female in urban area contribute family support without pay, and they work much more hours both in their job and household work compared with male in urban area. 
+  In rural area, almost half of male in urban area contribute family support without pay, and also spend less time on working outside of home. However, most of female in urban area contribute family support without pay and still devote many hours in earning money.
+  Both in urban and rural area, people own business without regular paid employees are more than other working areas except for conributing family support without pay.
+
+```{r, analysis plus multinominal logit model}
+summary(ahs_combo$q05_12)
+```
+
+# Uniform the income
+  Uniform the income into monthly income.
+```{r}
+ahs_combo <- ahs_combo %>%
+  mutate(monthlyincome = ifelse(q05_12 == "Monthly", (q05_14a + q05_14b), ifelse((q05_12 == "Weekly")| (q05_12 == "Others") | (q05_12 == "Daily"), (q05_13a + q05_13b)*4.33, 0))) %>%
+  select (psu, hhno, idcode1, q01_01, q05_12, q05_13a, q05_13b, q05_14a, q05_14b, monthlyincome, everything ())
+ahs_combo
+```
+
+
+```{r}
+model1 <- lm (monthlyincome ~ urbrur + q01_01 + q01_15, data=ahs_combo)
+summary(model1)
+```
+
+# Fuction for quantity transformation
+  This function transforms all weightet unit into (Kg) and count number into 1 item.
+```{r}
+metricconvert <- function (qty, unit) {
+  if (is.na (qty)) {
+    (0)
+  }
+  else if (is.na(unit)) {
+    (qty)
+  }
+  else if (unit ==1) {
+    (qty*1000)
+  }
+  else if (unit == 3) {
+    (qty*37000)
+  }
+  else if (unit == 4) {
+    (qty*1000)
+  }
+  else if (unit == 6) {
+    (qty*60000)
+  }
+  else if (unit == 7) {
+    (qty*3200)
+  }
+  else if (unit == 8) {
+    (qty*400)
+  }
+  else if (unit == 11) {
+    (qty*12)
+  }
+  else if (unit == 12) {
+    (qty*100000)
+  }
+  else {
+    qty
+  }
+}
+```
+
+# Food tidy dataset
+  Tidied with uniform unit of food, then make each kind of food has a column to show the quantity.
+```{r}
+ahs_food_tidy <- ahs_food %>%
+  rowwise() %>%
+  mutate (qty1 = metricconvert(q03_04a, q03_04b), 
+          qty2 = metricconvert(q03_05a, q03_05b), 
+          qty3 = metricconvert(q03_06a, q03_06b)) %>%
+  mutate (totalqty = (qty1 + qty2 + qty3)) %>%
+  rename ("Item_name" = q03_02itm) %>%
+  select (psu, hhno, Item_name, totalqty) %>%
+  spread (Item_name, totalqty)
+ahs_food_tidy
+```
+
+```{r}
+ahs_food_tidy %>%
+```
+
+```{r}
+foodorder <- as.tibble(unique(ahs_food$q03_02itm))
+foodorder
+foodorder1 <- foodorder %>% pull(value)
+foodorder1
+```
+
+# New food tidy data
+  Classify diffrent kind of food into 7 category.
+```{r}
+ahs_food_tidy_new <- ahs_food_tidy %>%
+  select(psu, hhno, foodorder1) %>%
+  rename(finerice = "Fine rice",
+         cRice = "Coarse rice",
+         bRice = "Beaten, flatten",
+         maizeF = "Maize flour",
+         wheat = "Wheat,  Wheat f",
+         otherGrains = "Other grains/ce",
+         blackLentils = "Black Gram (Mas",
+         yLentils = "Lentil (Musuro)",
+         rLentils = "Red Gram",
+         grams = "Horse Gram (Cha", 
+         otherLentils = "Other pulses (.",
+         otherbeans = "Other beans (..",
+         goatMeat = "Mutton (Goat)",
+         mutton = "Mutton (Sheep)",
+         otherMeat = "Other meat ( Du",
+         cMilk = "Condensed milk",
+         babyMilk = "Baby milk/Powde",
+         otherMilkprod = "Other milk prod", 
+         vegButter = "Vegetable Ghee/",
+         oil1 = "Musturd oil",
+         oil2 = "Sunflower oil",
+         oil3 = "Soyabean oil",
+         other_oils = "Others oil (Mai",
+         citrusFruits = "Citrus fruits (",
+         otherFruits = "Other fruits (.",
+         driedFruits = "Dried fruits (W",
+         greenLeaf = "Green leafy veg",
+         greenBeans = "Green beans",
+         pumpkin = "LAUKA, Pumpkin,",
+          
+         okra = "Ladies finger",
+         snapPeas = "MOTARKOSA, ..",
+         driedGreen = "GUNDRUK, MASYOU",
+         otherGreen = "Other Green Veg",
+         jam = "Jam, Jelly",
+         popsicles = "BURUF and Ice c",
+         cumin = "Cumin seed/Blac",
+         otherspices = "Other spices (",
+         groundCoffee = "Coffee (dust)",
+         juice = "Fruits juice",
+         sodaDrinks = "Cock, Pepsi",
+         otherTobacco = "Other tobacco",
+         miscFood = "Misc. other foo",
+         colasis = "Colasis,.....",
+         cauliCabbage = "Cauliflower/Cab"
+         ) %>%
+  mutate (allgrains = (finerice + cRice + bRice +  Maize +  maizeF + wheat  + Millet + Buckwheat + Barley + otherGrains),
+          lentilsBeans = (blackLentils +  yLentils + rLentils + grams + otherLentils + Beans + Soyabean + otherbeans),
+          allMeat = (goatMeat + mutton + Buff + Chicken + Pork + otherMeat),
+          allOils = (Ghee + vegButter + oil1 + oil2 + oil3 + other_oils),
+          banana = (ifelse ((Bananas <180), (Bananas*180), Bananas)), #each banana is about 180gms.
+          fruits = (banana + citrusFruits + Mangoes + Apples + Pineapple + Papaya + Graps + otherFruits + driedFruits),
+          freshveggies = (Potato+ cauliCabbage + greenLeaf + greenBeans + Cucumber + pumpkin + Onion + BHANTA + ISHKUS + okra + Bitterguard + snapPeas + PARWAL + Mushroom + driedGreen  + otherGreen)
+          )
+ahs_food_tidy_new
+```
+
+
+```{r}
+names(ahs_food_tidy_new)
+ahs_food_tidy_new %>% 
+  filter(otherspices>0)
+```
+
+# Foodtidy dataset
+  This combo dataste is combined with new food tidy data.
+```{r}
+ahs_combo <- ahs_combo %>%
+  left_join (ahs_food_tidy)
+ahs_combo
+```
+Model:
+dependent variable:
+
+```{r}
+library(nnet)
+library(dplyr)
+ahs_combo_hh <- ahs_combo %>%
+  distinct(psu, hhno, .keep_all= TRUE )
+ahs_combo_hh
+```
+
+
+```{r}
+ahs_combo_hh <- ahs_combo_hh %>%
+  rename ("fuel" = q02_27, "ownhouse" = q02_05,
+          "lightsource" = q02_24,
+          "garbage" = q02_21,
+          "firewood" = q02_28,
+          "familysize" = fmlymemb, 
+          "totalrooms" = q02_01) %>%
+  select (psu, hhno, fuel, urbrur, lightsource, firewood, garbage, familysize, everything())
+ahs_combo_hh
+```
+
+
+```{r}
+logit_model <- multinom(fuel ~ urbrur + lightsource + familysize + totalrooms, data = ahs_combo_hh)
+```
+
+```{r}
+summary(logit_model)
+```
+
+
+```{r, warning=FALSE}
+z <- summary(logit_model)$coefficients/summary(logit_model)$standard.errors
+p <- (1 - pnorm(abs(z), 0, 1))*2
+p
+```
+
+
+```{r}
+factor(ahs_combo_hh$totalrooms)
+```
+
+```{r}
+head(fitted(logit_model))
+expanded=expand.grid (urbrur = c("Rural", "Urban"), 
+                      lightsource = c("Electricity", "Solar", "Biogas", "Kerosene", "Other"),
+                      familysize = c(2, 4, 6, 8, 10),
+                      totalrooms = c(2, 4, 6, 8, 10))
+head(expanded)
+predicted=predict(logit_model,expanded,type="probs")
+head(predicted)
+```
+
+
+```{r}
+#adding predictions to the expanded data:
+
+bpp=cbind(expanded, predicted)
+head(bpp)
+by(bpp[,3:4], bpp$urbrur, colMeans)
+
+```
+
+
+
+```{r}
+library("reshape2")
+bpp2 = melt (bpp, id.vars = c("urbrur", "lightsource", "familysize", "totalrooms"), value.name = "probability")
+head(bpp2)
+```
+
+
+
+```{r}
+ggplot (bpp2, aes(x=lightsource, y= probability, color= urbrur)) +
+  geom_jitter() +
+  facet_grid(variable ~., scales = "free")
+```
+
+```{r}
+
+```
+
